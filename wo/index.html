@@ -8,7 +8,7 @@
     <script type="importmap">
       {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"}}
     </script>
-    <title>房间点云预览</title>
+    <title>INM Project</title>
   </head>
   <body>
     <div id="app">
@@ -21,9 +21,9 @@
           <p class="eyebrow">ROOM SCAN · 01</p>
           <h1>让空间，<br /><span>以另一种方式显形。</span></h1>
           <form id="command-form" class="command-box">
-            <label for="command-input">场景命令</label>
+            <label for="command-input">这个描述好尬，草</label>
             <div class="command-entry"><input id="command-input" type="text" placeholder="输入命令…" autocomplete="off" spellcheck="false" /><button type="submit">发送</button></div>
-            <p class="command-help">/point X　调整点大小<br />/coor on　开启坐标读取<br />/coor off　关闭坐标读取</p>
+            <p class="command-help">/point X　调整点大小（不要大于0.1！！！！！）<br />/coor on　开启坐标读取<br />/coor off　关闭坐标读取</p>
             <p id="command-status" class="command-status" aria-live="polite">点云已载入</p>
           </form>
         </section>
