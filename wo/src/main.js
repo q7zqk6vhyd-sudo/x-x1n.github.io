@@ -65,9 +65,20 @@ const loadRoom = (url, fallback = false) => loader.load(
     controls.target.set(0, 0, 0);
     controls.minDistance = span * 0.08;
     controls.maxDistance = span * 12;
+    // Polycam scans normally use Y as the vertical axis; start orbiting around floor level.
+    controls.target.set(0, -size.y / 2, 0);
+    camera.position.add(controls.target);
     controls.update();
     initialCamera = camera.position.clone();
     initialTarget = controls.target.clone();
+    const pivotSlider = document.querySelector('#pivot-height');
+    const pivotLabel = document.querySelector('#pivot-value');
+    pivotSlider.addEventListener('input', () => {
+      const ratio = Number(pivotSlider.value) / 100;
+      controls.target.y = -size.y / 2 + size.y * ratio;
+      pivotLabel.value = `${Math.round(ratio * 100)}%`;
+      pivotLabel.textContent = ratio === 0 ? '地面' : `${Math.round(ratio * 100)}%`;
+    });
     loading.remove();
   },
   (event) => {

@@ -32,7 +32,7 @@
           <div class="viewer-top"><span><span class="live-dot"></span> ROOM / POINT CLOUD</span><button id="reset-view" type="button">重置视角 <span>↺</span></button></div>
           <div id="canvas-wrap"><div class="loading" id="loading"><span class="spinner"></span><span>正在载入空间…</span></div></div>
           <div class="viewer-bottom"><span>拖动旋转</span><span>滚轮缩放</span><span>右键平移</span></div>
-          <div class="point-control"><label for="point-size">点大小 <output id="point-size-value">1.0×</output></label><input id="point-size" type="range" min="0.5" max="3" step="0.1" value="1" aria-label="调整点云中点的大小" /></div>
+          <div class="point-control"><label for="point-size">点大小 <output id="point-size-value">1.0×</output></label><input id="point-size" type="range" min="0.5" max="3" step="0.1" value="1" aria-label="调整点云中点的大小" /><label for="pivot-height">旋转中心高度 <output id="pivot-value">地面</output></label><input id="pivot-height" type="range" min="0" max="100" step="1" value="0" aria-label="调整房间旋转中心的高度" /></div>
           <div class="error" id="error" hidden></div>
         </section>
       </main>
