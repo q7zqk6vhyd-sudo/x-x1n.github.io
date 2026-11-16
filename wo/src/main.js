@@ -10,6 +10,7 @@ scene.background = new THREE.Color('#111516');
 
 const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 10000);
 camera.position.set(0, 1.2, 3);
+camera.up.set(0, 0, 1);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -64,7 +65,7 @@ const loadRoom = (url, fallback = false) => loader.load(
     controls.minDistance = span * 0.08;
     controls.maxDistance = span * 12;
     // 几何已平移到包围盒中点，因此原点就是房间模型的中间点。
-    controls.target.set(0, 0, 0);
+    controls.target.set(0.404, 0.540, -1.364);
     controls.update();
     initialCamera = camera.position.clone();
     initialTarget = controls.target.clone();
