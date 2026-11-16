@@ -76,9 +76,11 @@ const loadRoom = (url, fallback = false) => loader.load(
     controls.target.copy(target);
 
     // 相机位置相对于旋转中心设置，保证中心改变后视角仍然对准模型。
-    camera.position.copy(target).add(
-      new THREE.Vector3(span * 0.95, span * 0.55, span * 1.35)
-    );
+camera.position.set(
+  target.x,
+  target.y - span * 2,
+  target.z + span * 0.5
+);
 
     controls.update();
 
