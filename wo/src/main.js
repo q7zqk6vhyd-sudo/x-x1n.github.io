@@ -33,13 +33,8 @@ const commandStatus = document.querySelector('#command-status');
 let coordinateMode = false;
 
 const loader = new PLYLoader();
-const modelUrls = [
-  new URL('../public/models/room.ply', import.meta.url).href,
-  new URL('../models/room.ply', import.meta.url).href,
-  new URL('public/models/room.ply', document.baseURI).href,
-];
-const loadRoom = (index = 0) => loader.load(
-  modelUrls[index],
+const loadRoom = (url, fallback = false) => loader.load(
+  url,
   (geometry) => {
     geometry.computeBoundingBox();
     const box = geometry.boundingBox;
@@ -80,16 +75,16 @@ const loadRoom = (index = 0) => loader.load(
   },
   (err) => {
     console.error(err);
-    if (index + 1 < modelUrls.length) {
-      loadRoom(index + 1);
+    if (!fallback) {
+      loadRoom('./public/models/room.ply', true);
       return;
     }
     loading.remove();
     errorBox.hidden = false;
-    errorBox.textContent = `模型未能载入。请确认仓库中存在 public/models/room.ply。已尝试：${modelUrls.map((url) => new URL(url).pathname).join('、')}`;
+    errorBox.textContent = '模型未能载入。请确认 public/models/room.ply 文件存在，并通过本地开发服务器打开网页。';
   },
 );
-loadRoom();
+loadRoom('./models/room.ply');
 
 renderer.domElement.addEventListener('pointerdown', (event) => {
   if (!coordinateMode || !cloud) return;
