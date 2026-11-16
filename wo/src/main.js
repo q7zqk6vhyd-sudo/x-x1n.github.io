@@ -24,6 +24,13 @@ controls.screenSpacePanning = true;
 let cloud;
 let initialCamera;
 let initialTarget;
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+const coordReadout = document.querySelector('#coord-readout');
+const commandForm = document.querySelector('#command-form');
+const commandInput = document.querySelector('#command-input');
+const commandStatus = document.querySelector('#command-status');
+let coordinateMode = false;
 
 const loader = new PLYLoader();
 const loadRoom = (url, fallback = false) => loader.load(
@@ -45,16 +52,8 @@ const loadRoom = (url, fallback = false) => loader.load(
       opacity: 0.96,
       depthWrite: false,
     });
-    const basePointSize = material.size;
-    const sizeSlider = document.querySelector('#point-size');
-    const sizeLabel = document.querySelector('#point-size-value');
-    sizeSlider.addEventListener('input', () => {
-      const scale = Number(sizeSlider.value);
-      material.size = basePointSize * scale;
-      sizeLabel.value = `${scale.toFixed(1)}×`;
-      sizeLabel.textContent = `${scale.toFixed(1)}×`;
-    });
     cloud = new THREE.Points(geometry, material);
+    cloud.frustumCulled = false;
     scene.add(cloud);
 
     const span = Math.max(size.x, size.y, size.z, 0.1);
@@ -62,23 +61,13 @@ const loadRoom = (url, fallback = false) => loader.load(
     camera.near = Math.max(span / 1000, 0.001);
     camera.far = span * 100;
     camera.updateProjectionMatrix();
-    controls.target.set(0, 0, 0);
     controls.minDistance = span * 0.08;
     controls.maxDistance = span * 12;
-    // Polycam scans normally use Y as the vertical axis; start orbiting around floor level.
-    controls.target.set(0, -size.y / 2, 0);
-    camera.position.add(controls.target);
+    // 几何已平移到包围盒中点，因此原点就是房间模型的中间点。
+    controls.target.set(0, 0, 0);
     controls.update();
     initialCamera = camera.position.clone();
     initialTarget = controls.target.clone();
-    const pivotSlider = document.querySelector('#pivot-height');
-    const pivotLabel = document.querySelector('#pivot-value');
-    pivotSlider.addEventListener('input', () => {
-      const ratio = Number(pivotSlider.value) / 100;
-      controls.target.y = -size.y / 2 + size.y * ratio;
-      pivotLabel.value = `${Math.round(ratio * 100)}%`;
-      pivotLabel.textContent = ratio === 0 ? '地面' : `${Math.round(ratio * 100)}%`;
-    });
     loading.remove();
   },
   (event) => {
@@ -96,6 +85,49 @@ const loadRoom = (url, fallback = false) => loader.load(
   },
 );
 loadRoom('./models/room.ply');
+
+renderer.domElement.addEventListener('pointerdown', (event) => {
+  if (!coordinateMode || !cloud) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+  raycaster.params.Points.threshold = Math.max(cloud.material.size * 2, 0.01);
+  raycaster.setFromCamera(pointer, camera);
+  const hit = raycaster.intersectObject(cloud)[0];
+  if (!hit) {
+    coordReadout.textContent = '附近没有点，请放大后再试';
+    return;
+  }
+  const p = hit.point;
+  coordReadout.textContent = `模型坐标（已居中）：X ${p.x.toFixed(3)} · Y ${p.y.toFixed(3)} · Z ${p.z.toFixed(3)}`;
+});
+
+commandForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const command = commandInput.value.trim();
+  const pointCommand = command.match(/^\/point\s+([0-9]*\.?[0-9]+)$/i);
+  if (pointCommand) {
+    const value = Number(pointCommand[1]);
+    if (!cloud || !Number.isFinite(value) || value <= 0) {
+      commandStatus.textContent = '点大小需要是大于 0 的数字，且模型已载入。';
+    } else {
+      cloud.material.size = value;
+      commandStatus.textContent = `点大小已设为 ${value}。`;
+    }
+  } else if (/^\/coor\s+on$/i.test(command)) {
+    coordinateMode = true;
+    coordReadout.hidden = false;
+    coordReadout.textContent = '坐标读取已开启：点击模型上的一点';
+    commandStatus.textContent = '坐标读取已开启。点击模型上的一点查看坐标。';
+  } else if (/^\/coor\s+off$/i.test(command)) {
+    coordinateMode = false;
+    coordReadout.hidden = true;
+    commandStatus.textContent = '坐标读取已关闭。';
+  } else {
+    commandStatus.textContent = '未识别命令。可用：/point X、/coor on、/coor off';
+  }
+  commandInput.value = '';
+  commandInput.focus();
+});
 
 document.querySelector('#reset-view').addEventListener('click', () => {
   if (!initialCamera) return;
