@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#111415" />
+    <link rel="stylesheet" href="./src/style.css" />
+    <script type="importmap">
+      {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"}}
+    </script>
+    <title>房间点云预览</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="房间点云预览首页"><span class="brand-mark">◌</span><span>空间档案</span></a>
+        <div class="topbar-meta"><span class="live-dot"></span>本地模型预览</div>
+      </header>
+      <main class="layout">
+        <section class="intro">
+          <p class="eyebrow">ROOM SCAN · 01</p>
+          <h1>让空间，<br /><span>以另一种方式显形。</span></h1>
+          <p class="description">一个由真实扫描生成的房间点云。拖动查看空间，滚动调整远近。</p>
+          <div class="model-info">
+            <div><span class="info-label">模型</span><span class="info-value">11_11_2026</span></div>
+            <div><span class="info-label">形式</span><span class="info-value">彩色点云 · 82,780 点</span></div>
+            <div><span class="info-label">交互</span><span class="info-value">旋转 / 缩放 / 平移</span></div>
+          </div>
+          <div class="tip"><span class="tip-icon">✳</span><span>下一步可以在空间中放入可点击的 3D 物件。</span></div>
+        </section>
+        <section class="viewer" aria-label="3D 房间点云查看器">
+          <div class="viewer-top"><span><span class="live-dot"></span> ROOM / POINT CLOUD</span><button id="reset-view" type="button">重置视角 <span>↺</span></button></div>
+          <div id="canvas-wrap"><div class="loading" id="loading"><span class="spinner"></span><span>正在载入空间…</span></div></div>
+          <div class="viewer-bottom"><span>拖动旋转</span><span>滚轮缩放</span><span>右键平移</span></div>
+          <div class="error" id="error" hidden></div>
+        </section>
+      </main>
+      <footer><span>ROOM STUDY <span class="footer-dot">·</span> 2026</span><span>从扫描开始，继续构建空间体验。</span></footer>
+    </div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
