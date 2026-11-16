@@ -45,6 +45,15 @@ const loadRoom = (url, fallback = false) => loader.load(
       opacity: 0.96,
       depthWrite: false,
     });
+    const basePointSize = material.size;
+    const sizeSlider = document.querySelector('#point-size');
+    const sizeLabel = document.querySelector('#point-size-value');
+    sizeSlider.addEventListener('input', () => {
+      const scale = Number(sizeSlider.value);
+      material.size = basePointSize * scale;
+      sizeLabel.value = `${scale.toFixed(1)}×`;
+      sizeLabel.textContent = `${scale.toFixed(1)}×`;
+    });
     cloud = new THREE.Points(geometry, material);
     scene.add(cloud);
 
