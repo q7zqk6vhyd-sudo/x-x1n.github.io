@@ -314,27 +314,24 @@ renderer.domElement.addEventListener('pointerup', (event) => {
     return;
   }
 
-  const playSound = () => {
-    if (sound.isPlaying) {
-      sound.stop();
-    }
-    sound.play();
-  };
-
-  // 浏览器通常要求用户操作触发音频播放。
-  if (audioListener.context.state === 'suspended') {
-    audioListener.context
-      .resume()
-      .then(playSound)
-      .catch((error) => console.error('无法启动音频：', error));
+  const toggleSound = () => {
+  if (sound.isPlaying) {
+    sound.pause();
+    commandStatus.textContent = '音频已暂停';
   } else {
-    playSound();
+    sound.play();
+    commandStatus.textContent = '正在播放物件音频';
   }
+};
 
-  if (commandStatus) {
-    commandStatus.textContent = '已播放物件音频';
-  }
-});
+if (audioListener.context.state === 'suspended') {
+  audioListener.context
+    .resume()
+    .then(toggleSound)
+    .catch((error) => console.error('无法启动音频：', error));
+} else {
+  toggleSound();
+}
 
 // 命令：/point X、/coor on、/coor off
 commandForm.addEventListener('submit', (event) => {
