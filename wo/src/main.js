@@ -332,7 +332,7 @@ if (audioListener.context.state === 'suspended') {
 } else {
   toggleSound();
 }
-
+});
 // 命令：/point X、/coor on、/coor off
 commandForm.addEventListener('submit', (event) => {
   event.preventDefault();
