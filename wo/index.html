@@ -9,35 +9,40 @@
     <script type="importmap">
       {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"}}
     </script>
-    <title>INM Project</title>
+    <title>INM Project · Room</title>
   </head>
   <body>
-    <div id="app">
-      <header class="topbar">
-        <a class="brand" href="#" aria-label="Title"><span class="brand-mark">◌</span><span>Subtitle</span></a>
-        <div class="topbar-meta"><span class="live-dot"></span>111</div>
-      </header>
-      <main class="layout">
-        <section class="intro">
-          <p class="eyebrow">ROOM SCAN · 01</p>
-          <h1>Line 1 description<br /><span>description</span></h1>
-          <form id="command-form" class="command-box">
-            <label for="command-input">这个描述好尬，草</label>
-            <div class="command-entry"><input id="command-input" type="text" placeholder="输入命令…" autocomplete="off" spellcheck="false" /><button type="submit">Command</button></div>
-            <p class="command-help">/point X　调整点大小（不要大于0.1！！！！！）<br />/coor on　开启坐标读取<br />/coor off　关闭坐标读取</p>
-            <p id="command-status" class="command-status" aria-live="polite">Model</p>
-          </form>
-        </section>
-        <section class="viewer" aria-label="3D 房间点云查看器">
-          <div class="viewer-top"><span><span class="live-dot"></span> ROOM / POINT CLOUD</span><button id="reset-view" type="button">重置视角 <span>↺</span></button></div>
-          <div id="canvas-wrap"><div class="loading" id="loading"><span class="spinner"></span><span>正在载入空间…</span></div></div>
-          <div class="viewer-bottom"><span>拖动旋转</span><span>滚轮缩放</span><span>右键平移</span></div>
-          <div class="coord-readout" id="coord-readout" hidden></div>
-          <div class="error" id="error" hidden></div>
-        </section>
-      </main>
-      <footer><span>ROOM STUDY <span class="footer-dot">·</span> 2026</span><span>22222</span></footer>
-    </div>
+    <main id="app" aria-label="房间第一人称体验">
+      <div id="canvas-wrap">
+        <div class="loading" id="loading"><span class="spinner"></span><span>正在载入空间…</span></div>
+      </div>
+      <div class="vignette" aria-hidden="true"></div>
+      <div class="crosshair" id="crosshair" aria-hidden="true"><span></span></div>
+      <div class="room-label"><span class="live-dot"></span> ROOM / POINT CLOUD</div>
+      <div class="help" id="help">WASD 移动 <span>·</span> 鼠标环视 <span>·</span> / 调试</div>
+      <div class="coord-readout" id="coord-readout" hidden></div>
+      <div class="error" id="error" hidden></div>
+
+      <section class="entry-screen" id="entry-screen" hidden>
+        <div class="entry-card">
+          <p class="entry-kicker">ROOM / FIRST PERSON</p>
+          <h1 id="entry-title">进入房间</h1>
+          <p id="entry-copy">点击开始漫游。使用 WASD 移动，移动鼠标环视。</p>
+          <button id="enter-button" type="button">开始漫游</button>
+          <p class="entry-foot">按 / 打开调试指令</p>
+        </div>
+      </section>
+
+      <section class="debug-backdrop" id="debug-backdrop" hidden>
+        <form class="debug-panel" id="command-form" role="dialog" aria-modal="true" aria-labelledby="debug-title">
+          <div class="debug-heading"><div><p class="entry-kicker">ROOM / DEBUG</p><h2 id="debug-title">调试指令</h2></div><button type="button" id="close-debug" aria-label="关闭">×</button></div>
+          <label class="sr-only" for="command-input">输入指令</label>
+          <div class="command-entry"><input id="command-input" type="text" placeholder="输入 /point 0.01 或 /coor on" autocomplete="off" spellcheck="false" /><button type="submit">执行</button></div>
+          <p class="command-help">/point X　调整点大小<br />/coor on　开启准心坐标读取<br />/coor off　关闭坐标读取</p>
+          <p id="command-status" class="command-status" aria-live="polite">按 Esc 关闭</p>
+        </form>
+      </section>
+    </main>
     <script type="module" src="./src/main.js"></script>
   </body>
 </html>

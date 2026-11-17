@@ -2,91 +2,124 @@ import * as THREE from 'three';
 import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-// 页面元素
 const host = document.querySelector('#canvas-wrap');
 const loading = document.querySelector('#loading');
 const errorBox = document.querySelector('#error');
-const coordReadout = document.querySelector('#coord-readout');
+const entryScreen = document.querySelector('#entry-screen');
+const entryTitle = document.querySelector('#entry-title');
+const entryCopy = document.querySelector('#entry-copy');
+const enterButton = document.querySelector('#enter-button');
+const debugBackdrop = document.querySelector('#debug-backdrop');
 const commandForm = document.querySelector('#command-form');
 const commandInput = document.querySelector('#command-input');
 const commandStatus = document.querySelector('#command-status');
+const coordReadout = document.querySelector('#coord-readout');
+const crosshair = document.querySelector('#crosshair');
 
-// 场景
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#111516');
-
-// OBJ/MTL 常用材质需要灯光
-scene.add(new THREE.AmbientLight(0xffffff, 1.5));
-
-const keyLight = new THREE.DirectionalLight(0xffffff, 2);
+scene.add(new THREE.HemisphereLight(0xe7eee4, 0x292b26, 1.5));
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.8);
 keyLight.position.set(2, -3, 5);
 scene.add(keyLight);
 
-// 相机：房间模型的 Z 轴朝上
-const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 10000);
+const camera = new THREE.PerspectiveCamera(72, 1, 0.01, 100);
 camera.up.set(0, 0, 1);
 
-// 渲染器
-const renderer = new THREE.WebGLRenderer({
-  antialias: true,
-  alpha: false,
-});
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.domElement.tabIndex = 0;
+renderer.domElement.setAttribute('aria-label', '房间漫游画面');
 host.appendChild(renderer.domElement);
 
-// 鼠标控制
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.07;
-controls.screenSpacePanning = true;
-
-// 状态
-let roomCloud = null;
-let interactiveModel = null;
-let initialCamera = null;
-let initialTarget = null;
-let coordinateMode = false;
-let pointerStart = null;
-
+const assetUrl = (path) => new URL(`./assets/${path}`, document.baseURI).href;
+const roomLoader = new PLYLoader();
 const coordinateRaycaster = new THREE.Raycaster();
-const clickRaycaster = new THREE.Raycaster();
-const pointer = new THREE.Vector2();
+const objectRaycaster = new THREE.Raycaster();
+const centerPointer = new THREE.Vector2(0, 0);
+const cameraDirection = new THREE.Vector3();
+const cameraTarget = new THREE.Vector3();
 
-// 音频
 const audioListener = new THREE.AudioListener();
 camera.add(audioListener);
-
 const sound = new THREE.Audio(audioListener);
 const audioLoader = new THREE.AudioLoader();
 
-// 资源路径相对于网页入口。
-// 如果网页地址为 /wo/，此函数会访问 /wo/assets/ 下的文件。
-const assetUrl = (path) => new URL(`./assets/${path}`, document.baseURI).href;
+let roomCloud = null;
+let interactiveModel = null;
+let coordinateMode = false;
+let debugOpen = false;
+let hasStarted = false;
+let introPlaying = false;
+let introStartTime = 0;
+let previousFrameTime = 0;
+let yaw = Math.PI; // 朝向房间前墙（Y 轴负方向）。
+let pitch = 0;
+let floorZ = -1.364;
+let pointSize = 0.009;
+const pressedKeys = new Set();
+const WALK_LIMITS = { minX: -0.65, maxX: 0.60, minY: -0.68, maxY: 0.75 };
+const START_X = 0.404;
+const START_Y = 0.540;
+const EYE_HEIGHT = 1.6;
+const INTRO_MS = 3800;
+const MOVE_SPEED = 0.82;
+const LOOK_SENSITIVITY = 0.0022;
 
-// 加载房间 PLY
-const plyLoader = new PLYLoader();
+function updateCameraLook() {
+  const cosPitch = Math.cos(pitch);
+  cameraDirection.set(
+    Math.sin(yaw) * cosPitch,
+    Math.cos(yaw) * cosPitch,
+    Math.sin(pitch)
+  );
+  cameraTarget.copy(camera.position).add(cameraDirection);
+  camera.lookAt(cameraTarget);
+}
 
-function loadRoom(url, fallback = false) {
-  plyLoader.load(
-    url,
+function showEntry(resume = false) {
+  entryTitle.textContent = resume ? '继续漫游' : '进入房间';
+  entryCopy.textContent = resume
+    ? '点击画面恢复鼠标视角。按 / 可打开调试指令。'
+    : '点击开始漫游。使用 WASD 移动，移动鼠标环视。';
+  enterButton.textContent = resume ? '继续漫游' : '开始漫游';
+  entryScreen.hidden = false;
+  crosshair.hidden = true;
+}
+
+function beginIntro() {
+  if (introPlaying) return;
+  introPlaying = true;
+  introStartTime = performance.now();
+  camera.position.set(START_X, START_Y, floorZ + 0.48);
+  yaw = Math.PI;
+  pitch = 0;
+  updateCameraLook();
+}
+
+function loadRoomFrom(paths, index = 0) {
+  if (index >= paths.length) {
+    loading.hidden = true;
+    errorBox.hidden = false;
+    errorBox.textContent = '房间模型未能载入。请确认 public/models/room.ply 文件存在。';
+    return;
+  }
+
+  roomLoader.load(
+    paths[index],
     (geometry) => {
       geometry.computeBoundingBox();
-
       const box = geometry.boundingBox;
       const center = box.getCenter(new THREE.Vector3());
       const size = box.getSize(new THREE.Vector3());
-
-      // 将房间包围盒中心移到坐标原点。
-      // /coor on 显示的坐标和物件位置都使用这个居中坐标系。
       geometry.translate(-center.x, -center.y, -center.z);
 
       const hasColors = geometry.hasAttribute('color');
-
+      pointSize = Math.max(size.length() / 480, 0.003);
       const material = new THREE.PointsMaterial({
-        size: Math.max(size.length() / 480, 0.003),
+        size: pointSize,
         sizeAttenuation: true,
         vertexColors: hasColors,
         color: hasColors ? 0xffffff : 0xc9ddd2,
@@ -94,127 +127,55 @@ function loadRoom(url, fallback = false) {
         opacity: 0.96,
         depthWrite: false,
       });
-
       roomCloud = new THREE.Points(geometry, material);
       roomCloud.frustumCulled = false;
       scene.add(roomCloud);
 
-      const span = Math.max(size.x, size.y, size.z, 0.1);
-
-      camera.near = Math.max(span / 1000, 0.001);
-      camera.far = span * 100;
+      camera.near = 0.01;
+      camera.far = Math.max(size.length() * 20, 100);
       camera.updateProjectionMatrix();
-
-      controls.minDistance = span * 0.08;
-      controls.maxDistance = span * 12;
-
-      // 地板两点的中点估算值；若想绕房间中心旋转，可改为 (0, 0, 0)。
-      const target = new THREE.Vector3(0.404, 0.540, -1.364);
-      controls.target.copy(target);
-
-      // 从前墙外侧（负 Y 方向）朝房间看。
-      camera.position.set(
-        target.x,
-        target.y - span * 2,
-        target.z + span * 0.5
-      );
-
-      controls.update();
-
-      initialCamera = camera.position.clone();
-      initialTarget = controls.target.clone();
-
-      loading.remove();
-
-      if (commandStatus) {
-        commandStatus.textContent = '房间点云已载入';
-      }
+      loading.hidden = true;
+      beginIntro();
     },
-    (event) => {
-      if (event.total > 0 && loading.lastElementChild) {
-        const percent = Math.round((event.loaded / event.total) * 100);
-        loading.lastElementChild.textContent = `正在载入空间… ${percent}%`;
-      }
-    },
+    undefined,
     (error) => {
-      console.error('PLY 房间模型加载失败：', error);
-
-      if (!fallback) {
-        loadRoom('./public/models/room.ply', true);
-        return;
-      }
-
-      loading.remove();
-      errorBox.hidden = false;
-      errorBox.textContent =
-        '房间模型未能载入。请确认房间文件位于 public/models/room.ply。';
+      console.warn(`房间模型路径不可用：${paths[index]}`, error);
+      loadRoomFrom(paths, index + 1);
     }
   );
 }
 
-// 兼容构建部署和直接发布仓库文件
-loadRoom('./models/room.ply');
+// 兼容 GitHub 仓库直接发布（public/models）和 Vite 构建发布（models）。
+loadRoomFrom(['./models/room.ply', './public/models/room.ply']);
 
-// 加载 OBJ 和 MTL。
-// MTL 文件中的 textures/xxx.jpg 会相对于这个模型文件夹查找。
-const objectDirectory = assetUrl('INMOBJECT1/');
-
+const modelDirectory = assetUrl('INMOBJECT1/');
 const mtlLoader = new MTLLoader();
-mtlLoader.setPath(objectDirectory);
-
+mtlLoader.setPath(modelDirectory);
 mtlLoader.load(
   'INMOBJECT1.mtl',
   (materials) => {
     materials.preload();
-
     const objLoader = new OBJLoader();
     objLoader.setMaterials(materials);
-    objLoader.setPath(objectDirectory);
-
+    objLoader.setPath(modelDirectory);
     objLoader.load(
       'INMOBJECT1.obj',
       (object) => {
         interactiveModel = object;
-
-        // 示例位置：可替换为 /coor on 读取到的坐标。
-        interactiveModel.position.set(0.404, 0.540, -1.364);
-
-        // 若物件模型按 Y 轴朝上导出，旋转以适配 Z 轴朝上的房间。
-        // 如果模型已经是 Z 轴朝上，可改为 0。
+        interactiveModel.position.set(START_X, START_Y, floorZ);
+        // 模型文件使用 Y 轴朝上时，旋转到房间的 Z 轴向上坐标系。
         interactiveModel.rotation.x = Math.PI / 2;
-
-        // 按实际房间比例调整。
         interactiveModel.scale.setScalar(1);
-
         scene.add(interactiveModel);
-
-        if (commandStatus) {
-          commandStatus.textContent = '房间与可交互物件已载入';
-        }
       },
       undefined,
-      (error) => {
-        console.error('OBJ 模型加载失败：', error);
-
-        if (commandStatus) {
-          commandStatus.textContent =
-            '物件未载入：请检查 assets/INMOBJECT1/INMOBJECT1.obj。';
-        }
-      }
+      (error) => console.error('OBJ 模型载入失败：', error)
     );
   },
   undefined,
-  (error) => {
-    console.error('MTL 材质加载失败：', error);
-
-    if (commandStatus) {
-      commandStatus.textContent =
-        '材质未载入：请检查 MTL 文件和 textures 文件夹。';
-    }
-  }
+  (error) => console.error('MTL 材质载入失败：', error)
 );
 
-// 加载点击后播放的 MP3
 audioLoader.load(
   assetUrl('INMSOUND1.mp3'),
   (buffer) => {
@@ -223,175 +184,214 @@ audioLoader.load(
     sound.setVolume(1);
   },
   undefined,
-  (error) => {
-    console.error('音频加载失败：', error);
-
-    if (commandStatus) {
-      commandStatus.textContent =
-        '音频未载入：请检查 assets/INMSOUND1.mp3。';
-    }
-  }
+  (error) => console.error('音频载入失败：', error)
 );
 
-// 开启 /coor on 后，点击点云读取坐标
-renderer.domElement.addEventListener('pointerdown', (event) => {
+function updateCoordinateReadout() {
   if (!coordinateMode || !roomCloud) return;
-
-  const rect = renderer.domElement.getBoundingClientRect();
-
-  pointer.set(
-    ((event.clientX - rect.left) / rect.width) * 2 - 1,
-    -((event.clientY - rect.top) / rect.height) * 2 + 1
-  );
-
-  coordinateRaycaster.params.Points.threshold = Math.max(
-    roomCloud.material.size * 2,
-    0.01
-  );
-
-  coordinateRaycaster.setFromCamera(pointer, camera);
-
+  coordinateRaycaster.params.Points.threshold = Math.max(pointSize * 2, 0.012);
+  coordinateRaycaster.setFromCamera(centerPointer, camera);
   const hit = coordinateRaycaster.intersectObject(roomCloud)[0];
-
-  if (!hit) {
-    coordReadout.textContent = '附近没有点，请放大后再试';
-    return;
-  }
-
-  const point = hit.point;
-
-  coordReadout.textContent =
-    `模型坐标（已居中）：X ${point.x.toFixed(3)} · ` +
-    `Y ${point.y.toFixed(3)} · Z ${point.z.toFixed(3)}`;
-});
-
-// 记录鼠标按下位置，以区分点击物件和拖动视角
-renderer.domElement.addEventListener('pointerdown', (event) => {
-  if (event.button !== 0) return;
-
-  pointerStart = {
-    x: event.clientX,
-    y: event.clientY,
-  };
-});
-
-// 点击 OBJ 物件时播放音频
-renderer.domElement.addEventListener('pointerup', (event) => {
-  if (!pointerStart) return;
-
-  const start = pointerStart;
-  pointerStart = null;
-
-  // 坐标读取模式中，点击用于读取点云坐标，不触发音频。
-  if (coordinateMode || !interactiveModel) return;
-
-  const moved = Math.hypot(
-    event.clientX - start.x,
-    event.clientY - start.y
-  );
-
-  // 拖动画面不算点击。
-  if (moved > 6) return;
-
-  const rect = renderer.domElement.getBoundingClientRect();
-
-  pointer.set(
-    ((event.clientX - rect.left) / rect.width) * 2 - 1,
-    -((event.clientY - rect.top) / rect.height) * 2 + 1
-  );
-
-  clickRaycaster.setFromCamera(pointer, camera);
-
-  // recursive=true 会检测 OBJ 下面的子网格。
-  const hits = clickRaycaster.intersectObject(interactiveModel, true);
-
-  if (hits.length === 0) return;
-
-  if (!sound.buffer) {
-    if (commandStatus) {
-      commandStatus.textContent = '音频仍在载入，请稍后再点击。';
-    }
-    return;
-  }
-
-  const toggleSound = () => {
-  if (sound.isPlaying) {
-    sound.pause();
-    commandStatus.textContent = '音频已暂停';
-  } else {
-    sound.play();
-    commandStatus.textContent = '正在播放物件音频';
-  }
-};
-
-if (audioListener.context.state === 'suspended') {
-  audioListener.context
-    .resume()
-    .then(toggleSound)
-    .catch((error) => console.error('无法启动音频：', error));
-} else {
-  toggleSound();
+  coordReadout.textContent = hit
+    ? `X ${hit.point.x.toFixed(3)} · Y ${hit.point.y.toFixed(3)} · Z ${hit.point.z.toFixed(3)}`
+    : '准心附近没有点';
 }
-});
-// 命令：/point X、/coor on、/coor off
+
+function toggleSound() {
+  if (!sound.buffer) {
+    commandStatus.textContent = '音频仍在载入，请稍后再点击物件。';
+    return;
+  }
+  const toggle = () => {
+    if (sound.isPlaying) {
+      sound.pause();
+      commandStatus.textContent = '音频已暂停';
+    } else {
+      sound.play();
+      commandStatus.textContent = '正在播放物件音频';
+    }
+  };
+  if (audioListener.context.state === 'suspended') {
+    audioListener.context.resume().then(toggle).catch((error) => console.error('音频无法启动：', error));
+  } else {
+    toggle();
+  }
+}
+
+function interactAtCrosshair() {
+  if (coordinateMode) {
+    updateCoordinateReadout();
+    return;
+  }
+  if (!interactiveModel) return;
+  objectRaycaster.setFromCamera(centerPointer, camera);
+  if (objectRaycaster.intersectObject(interactiveModel, true).length > 0) toggleSound();
+}
+
+function openDebug() {
+  if (debugOpen) return;
+  debugOpen = true;
+  debugBackdrop.hidden = false;
+  if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
+  crosshair.hidden = true;
+  commandInput.value = '';
+  commandInput.focus();
+}
+
+function closeDebug() {
+  if (!debugOpen) return;
+  debugOpen = false;
+  debugBackdrop.hidden = true;
+  if (hasStarted) showEntry(true);
+}
+
 commandForm.addEventListener('submit', (event) => {
   event.preventDefault();
-
   const command = commandInput.value.trim();
   const pointCommand = command.match(/^\/point\s+([0-9]*\.?[0-9]+)$/i);
 
   if (pointCommand) {
     const value = Number(pointCommand[1]);
-
     if (!roomCloud || !Number.isFinite(value) || value <= 0) {
-      commandStatus.textContent =
-        '点大小需要是大于 0 的数字，且房间模型已载入。';
+      commandStatus.textContent = '请输入大于 0 的点大小。';
     } else {
+      pointSize = value;
       roomCloud.material.size = value;
       commandStatus.textContent = `点大小已设为 ${value}。`;
     }
   } else if (/^\/coor\s+on$/i.test(command)) {
     coordinateMode = true;
     coordReadout.hidden = false;
-    coordReadout.textContent = '坐标读取已开启：点击点云上的一点';
-    commandStatus.textContent = '坐标读取已开启。';
+    updateCoordinateReadout();
+    commandStatus.textContent = '坐标读取已开启：准心瞄准点云并点击读取。';
   } else if (/^\/coor\s+off$/i.test(command)) {
     coordinateMode = false;
     coordReadout.hidden = true;
     commandStatus.textContent = '坐标读取已关闭。';
   } else {
-    commandStatus.textContent =
-      '未识别命令。可用：/point X、/coor on、/coor off';
+    commandStatus.textContent = '未识别命令。可用：/point X、/coor on、/coor off';
   }
-
   commandInput.value = '';
   commandInput.focus();
 });
 
-// 重置到模型加载完成时的视角
-document.querySelector('#reset-view').addEventListener('click', () => {
-  if (!initialCamera || !initialTarget) return;
-
-  camera.position.copy(initialCamera);
-  controls.target.copy(initialTarget);
-  controls.update();
+document.querySelector('#close-debug').addEventListener('click', closeDebug);
+debugBackdrop.addEventListener('pointerdown', (event) => {
+  if (event.target === debugBackdrop) closeDebug();
 });
 
-// 窗口尺寸变化时调整画布
+document.addEventListener('keydown', (event) => {
+  if (event.key === '/' && !debugOpen && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
+    event.preventDefault();
+    openDebug();
+    return;
+  }
+  if (event.key === 'Escape' && debugOpen) {
+    event.preventDefault();
+    closeDebug();
+    return;
+  }
+  if (debugOpen || !hasStarted) return;
+  const key = event.key.toLowerCase();
+  if (['w', 'a', 's', 'd'].includes(key)) {
+    event.preventDefault();
+    pressedKeys.add(key);
+  }
+  if (event.code === 'Space') event.preventDefault();
+});
+
+document.addEventListener('keyup', (event) => pressedKeys.delete(event.key.toLowerCase()));
+window.addEventListener('blur', () => pressedKeys.clear());
+
+document.addEventListener('mousemove', (event) => {
+  if (document.pointerLockElement !== renderer.domElement || debugOpen) return;
+  yaw += event.movementX * LOOK_SENSITIVITY;
+  pitch = THREE.MathUtils.clamp(pitch - event.movementY * LOOK_SENSITIVITY, -1.42, 1.42);
+  updateCameraLook();
+});
+
+renderer.domElement.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || document.pointerLockElement !== renderer.domElement || debugOpen) return;
+  interactAtCrosshair();
+});
+
+document.addEventListener('pointerlockchange', () => {
+  const locked = document.pointerLockElement === renderer.domElement;
+  if (locked) {
+    hasStarted = true;
+    entryScreen.hidden = true;
+    crosshair.hidden = false;
+  } else {
+    pressedKeys.clear();
+    crosshair.hidden = true;
+    if (hasStarted && !debugOpen) showEntry(true);
+  }
+});
+
+async function requestPointerLock() {
+  try {
+    const result = renderer.domElement.requestPointerLock();
+    if (result && typeof result.then === 'function') await result;
+    if (audioListener.context.state === 'suspended') await audioListener.context.resume();
+  } catch (error) {
+    entryCopy.textContent = '浏览器未能启用鼠标锁定，请点击画面重试。';
+    console.warn('鼠标锁定未能启动：', error);
+  }
+}
+
+enterButton.addEventListener('click', requestPointerLock);
+entryScreen.addEventListener('click', (event) => {
+  if (event.target === entryScreen) requestPointerLock();
+});
+
+function movePlayer(deltaSeconds) {
+  if (!hasStarted || document.pointerLockElement !== renderer.domElement || debugOpen) return;
+  let forward = 0;
+  let strafe = 0;
+  if (pressedKeys.has('w')) forward += 1;
+  if (pressedKeys.has('s')) forward -= 1;
+  if (pressedKeys.has('d')) strafe += 1;
+  if (pressedKeys.has('a')) strafe -= 1;
+  if (forward === 0 && strafe === 0) return;
+
+  const length = Math.hypot(forward, strafe);
+  forward /= length;
+  strafe /= length;
+  const distance = MOVE_SPEED * deltaSeconds;
+  const dx = (Math.sin(yaw) * forward + Math.cos(yaw) * strafe) * distance;
+  const dy = (Math.cos(yaw) * forward - Math.sin(yaw) * strafe) * distance;
+  // 将活动区域收在扫描房间的地面范围内，并留出墙边缓冲。
+  camera.position.x = THREE.MathUtils.clamp(camera.position.x + dx, WALK_LIMITS.minX, WALK_LIMITS.maxX);
+  camera.position.y = THREE.MathUtils.clamp(camera.position.y + dy, WALK_LIMITS.minY, WALK_LIMITS.maxY);
+}
+
 function resize() {
   const width = host.clientWidth;
   const height = host.clientHeight;
-
+  if (!width || !height) return;
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
   renderer.setSize(width, height);
 }
-
 new ResizeObserver(resize).observe(host);
 resize();
 
-// 渲染循环
-renderer.setAnimationLoop(() => {
-  controls.update();
+renderer.setAnimationLoop((time) => {
+  const deltaSeconds = previousFrameTime ? Math.min((time - previousFrameTime) / 1000, 0.05) : 0;
+  previousFrameTime = time;
+
+  if (introPlaying) {
+    const t = THREE.MathUtils.clamp((time - introStartTime) / INTRO_MS, 0, 1);
+    const eased = t * t * (3 - 2 * t);
+    camera.position.set(START_X, START_Y - 0.22 * eased, floorZ + 0.48 + (EYE_HEIGHT - 0.48) * eased);
+    updateCameraLook();
+    if (t >= 1) {
+      introPlaying = false;
+      showEntry(false);
+    }
+  } else {
+    movePlayer(deltaSeconds);
+    if (coordinateMode) updateCoordinateReadout();
+  }
   renderer.render(scene, camera);
 });
