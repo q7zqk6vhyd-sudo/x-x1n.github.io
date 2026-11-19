@@ -70,6 +70,10 @@ let gestureInitializing = false;
 let gestureGeneration = 0;
 let gestureTurn = 0;
 let gestureStrafe = 0;
+let gesturePitchActive = false;
+let gesturePitchNeutralY = 0.5;
+let gesturePitchBase = 0;
+let gesturePitchTarget = 0;
 let gestureLastSeen = 0;
 let lastGestureFrame = 0;
 const lastGestureByHand = { Left: 'None', Right: 'None' };
@@ -468,7 +472,7 @@ async function startGestureMode() {
     lastGestureByHand.Left = 'None';
     lastGestureByHand.Right = 'None';
     setGestureButtons('关闭摄像头手势控制');
-    commandStatus.textContent = '左手食指向左看、右手食指向右看；左/右拇指分别侧移。握拳后张开手掌可交互。';
+    commandStatus.textContent = '左手食指举起持续左转并上下调节视角，右手食指举起持续右转；左/右拇指分别侧移。握拳后张开交互。';
     if (!document.pointerLockElement && !debugOpen) {
       hasStarted = true;
       entryScreen.hidden = true;
@@ -490,6 +494,7 @@ function stopGestureMode(showStatus = true) {
   gestureActive = false;
   gestureTurn = 0;
   gestureStrafe = 0;
+  gesturePitchActive = false;
   gestureLastSeen = 0;
   lastGestureByHand.Left = 'None';
   lastGestureByHand.Right = 'None';
@@ -531,6 +536,7 @@ function recognizeHandFrame(time) {
   const handsSeen = new Set();
   let turn = 0;
   let strafe = 0;
+  let pitchActiveThisFrame = false;
   for (let i = 0; i < (result.landmarks?.length || 0); i += 1) {
     const hand = result.landmarks[i];
     const handSide = (result.handednesses?.[i]?.[0] || result.handedness?.[i]?.[0])?.categoryName;
@@ -541,7 +547,20 @@ function recognizeHandFrame(time) {
     const name = category && category.score >= 0.58 ? category.categoryName : 'None';
     const previousName = lastGestureByHand[handSide];
 
-    if (name === 'Pointing_Up') turn += handSide === 'Left' ? -1 : 1;
+    if (name === 'Pointing_Up' && handSide === 'Right') turn += 1;
+    if (name === 'Pointing_Up' && handSide === 'Left') {
+      if (previousName !== 'Pointing_Up') {
+        gesturePitchNeutralY = (hand[0].y + hand[9].y) * 0.5;
+        gesturePitchBase = pitch;
+      }
+      const handCenterY = (hand[0].y + hand[9].y) * 0.5;
+      gesturePitchTarget = THREE.MathUtils.clamp(
+        gesturePitchBase + (gesturePitchNeutralY - handCenterY) * 3.2,
+        -1.25,
+        1.25
+      );
+      pitchActiveThisFrame = true;
+    }
     if (name === 'Thumb_Up') strafe += handSide === 'Left' ? -1 : 1;
 
     // 握拳后张开才触发，避免手掌一直张开时反复触发交互。
@@ -555,6 +574,7 @@ function recognizeHandFrame(time) {
   for (const handSide of ['Left', 'Right']) {
     if (!handsSeen.has(handSide)) lastGestureByHand[handSide] = 'None';
   }
+  gesturePitchActive = pitchActiveThisFrame;
   if (handsSeen.size === 0) {
     gestureTurn = 0;
     gestureStrafe = 0;
@@ -727,6 +747,10 @@ function movePlayer(deltaSeconds) {
   const pointerLocked = document.pointerLockElement === renderer.domElement;
   if (!hasStarted || (!pointerLocked && !gestureFresh) || debugOpen) return;
   if (gestureFresh) yaw += gestureTurn * 2.0 * deltaSeconds;
+  if (gestureFresh && gesturePitchActive) {
+    const pitchEase = 1 - Math.exp(-8 * deltaSeconds);
+    pitch = THREE.MathUtils.lerp(pitch, gesturePitchTarget, pitchEase);
+  }
   let forward = 0;
   let strafe = 0;
   if (pressedKeys.has('w')) forward += 1;
@@ -735,7 +759,7 @@ function movePlayer(deltaSeconds) {
   if (pressedKeys.has('a')) strafe -= 1;
   if (gestureFresh) strafe += gestureStrafe;
   if (forward === 0 && strafe === 0) {
-    if (gestureFresh && gestureTurn !== 0) updateCameraLook();
+    if (gestureFresh && (gestureTurn !== 0 || gesturePitchActive)) updateCameraLook();
     return;
   }
 
