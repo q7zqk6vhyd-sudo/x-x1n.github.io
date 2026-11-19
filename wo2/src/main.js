@@ -51,6 +51,111 @@ const audioListener = new THREE.AudioListener();
 camera.add(audioListener);
 const sound = new THREE.Audio(audioListener);
 const audioLoader = new THREE.AudioLoader();
+
+let roomCloud = null;
+let interactiveModel = null;
+let coordinateMode = false;
+let debugOpen = false;
+let hasStarted = false;
+let introPlaying = false;
+let introStartTime = 0;
+let previousFrameTime = 0;
+let yaw = Math.PI; // 朝向房间前墙（Y 轴负方向）。
+let pitch = 0;
+let floorZ = -1.364;
+let pointSize = 0.009;
+let gestureRecognizer = null;
+let gestureStream = null;
+let gestureActive = false;
+let gestureInitializing = false;
+let gestureGeneration = 0;
+let gestureTurn = 0;
+let gestureStrafe = 0;
+let gesturePitchActive = false;
+let gesturePitchNeutralY = 0.5;
+let gesturePitchBase = 0;
+let gesturePitchTarget = 0;
+let gestureLastSeen = 0;
+let lastGestureFrame = 0;
+const lastGestureByHand = { Left: 'None', Right: 'None' };
+let lastInteractionAt = 0;
+let scatterStartedAt = 0;
+let scatterAnimating = false;
+const pressedKeys = new Set();
+const WALK_LIMITS = { minX: -0.65, maxX: 0.60, minY: -0.68, maxY: 0.75 };
+const START_X = 0.404;
+const START_Y = 0.540;
+const EYE_HEIGHT = 1.6;
+const INTRO_MS = 3800;
+const MOVE_SPEED = 0.82;
+const LOOK_SENSITIVITY = 0.0022;
+
+function updateCameraLook() {
+  const cosPitch = Math.cos(pitch);
+  cameraDirection.set(
+    Math.sin(yaw) * cosPitch,
+    Math.cos(yaw) * cosPitch,
+    Math.sin(pitch)
+  );
+  cameraTarget.copy(camera.position).add(cameraDirection);
+  camera.lookAt(cameraTarget);
+}
+
+function showEntry(resume = false) {
+  entryTitle.textContent = resume ? '继续漫游' : '进入房间';
+  entryCopy.textContent = resume
+    ? '点击画面恢复鼠标视角。按 / 可打开调试指令。'
+    : '点击开始漫游。使用 WASD 移动，移动鼠标环视。';
+  enterButton.textContent = resume ? '继续漫游' : '开始漫游';
+  entryScreen.hidden = false;
+  crosshair.hidden = true;
+}
+
+function beginIntro() {
+  if (introPlaying) return;
+  introPlaying = true;
+  introStartTime = performance.now();
+  camera.position.set(START_X, START_Y, floorZ + 0.48);
+  yaw = Math.PI;
+  pitch = 0;
+  updateCameraLook();
+}
+
+function loadRoomFromOBJ() {
+  roomLoader.load(assetUrl('ROOMSCENE/11_11_2026.obj'), (root) => {
+    root.updateMatrixWorld(true);
+    const points = [];
+    root.traverse((mesh) => {
+      if (!mesh.isMesh) return;
+      const attr = mesh.geometry.attributes.position;
+      const v = new THREE.Vector3();
+      for (let i = 0; i < attr.count; i += 2) {
+        v.fromBufferAttribute(attr, i).applyMatrix4(mesh.matrixWorld);
+        points.push(v.x, v.y, v.z);
+      }
+    });
+    if (!points.length) {
+      loading.hidden = true; errorBox.hidden = false;
+      errorBox.textContent = '房间模型中没有可读取的顶点。'; return;
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+    geometry.computeBoundingSphere();
+    pointSize = 0.009;
+    const material = new THREE.PointsMaterial({size:pointSize,sizeAttenuation:true,color:0xc9ddd2,transparent:true,opacity:0.86,depthWrite:false});
+    roomCloud = new THREE.Points(geometry, material);
+    roomCloud.frustumCulled = false;
+    scene.add(roomCloud);
+    loading.hidden = true;
+    beginIntro();
+  }, undefined, (error) => {
+    console.error('Room OBJ loading error:', error);
+    loading.hidden = true; errorBox.hidden = false;
+    errorBox.textContent = '房间模型载入失败：请检查 ROOMSCENE/11_11_2026.obj';
+  });
+}
+loadRoomFromOBJ();
+
 const modelDirectory = assetUrl('INMOBJECT1/');
 const mtlLoader = new MTLLoader();
 mtlLoader.setPath(modelDirectory);
@@ -521,47 +626,4 @@ renderer.setAnimationLoop((time) => {
   renderer.render(scene, camera);
 });
 
-window.addEventListener('beforeunload', () => stopGestureMode(false));function loadRoomOBJ() {
-  roomLoader.load(assetUrl('ROOMSCENE/11_11_2026.obj'), (root) => {
-    root.updateMatrixWorld(true);
-    const points = [];
-    root.traverse((mesh) => {
-      if (!mesh.isMesh) return;
-      const g = mesh.geometry;
-      const attr = g.attributes.position;
-      const matrix = mesh.matrixWorld;
-      const v = new THREE.Vector3();
-      // Sample mesh vertices; retain the original room coordinate system for navigation.
-      for (let i = 0; i < attr.count; i += 2) {
-        v.fromBufferAttribute(attr, i).applyMatrix4(matrix);
-        points.push(v.x, v.y, v.z);
-      }
-    });
-    if (!points.length) {
-      loading.hidden = true;
-      errorBox.hidden = false;
-      errorBox.textContent = '房间模型中没有可读取的网格顶点。';
-      return;
-    }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
-    geometry.computeBoundingSphere();
-    pointSize = 0.009;
-    const material = new THREE.PointsMaterial({
-      size: pointSize, sizeAttenuation: true, color: 0xc9ddd2,
-      transparent: true, opacity: 0.86, depthWrite: false
-    });
-    roomCloud = new THREE.Points(geometry, material);
-    roomCloud.frustumCulled = false;
-    scene.add(roomCloud);
-    loading.hidden = true;
-    beginIntro();
-  }, undefined, (error) => {
-    console.error('房间 OBJ 载入失败', error);
-    loading.hidden = true;
-    errorBox.hidden = false;
-    errorBox.textContent = '房间模型载入失败，请检查 ROOMSCENE/11_11_2026.obj。';
-  });
-}
-loadRoomOBJ();
-
+window.addEventListener('beforeunload', () => stopGestureMode(false));
