@@ -45,6 +45,7 @@ const cameraDirection = new THREE.Vector3();
 const cameraTarget = new THREE.Vector3();
 const scatterUniform = { value: 0 };
 const scatterOriginUniform = { value: new THREE.Vector3() };
+const scatterRadiusUniform = { value: 0.62 };
 
 const audioListener = new THREE.AudioListener();
 camera.add(audioListener);
@@ -68,11 +69,12 @@ let gestureStream = null;
 let gestureActive = false;
 let gestureInitializing = false;
 let gestureGeneration = 0;
-let gestureForward = 0;
 let gestureTurn = 0;
+let gestureStrafe = 0;
 let gestureLastSeen = 0;
 let lastGestureFrame = 0;
-let lastGestureName = 'None';
+const lastGestureByHand = { Left: 'None', Right: 'None' };
+let lastInteractionAt = 0;
 let scatterStartedAt = 0;
 let scatterAnimating = false;
 const pressedKeys = new Set();
@@ -146,11 +148,13 @@ function loadRoomFrom(paths, index = 0) {
       material.onBeforeCompile = (shader) => {
         shader.uniforms.uScatter = scatterUniform;
         shader.uniforms.uScatterOrigin = scatterOriginUniform;
+        shader.uniforms.uScatterRadius = scatterRadiusUniform;
         shader.vertexShader = shader.vertexShader.replace(
           '#include <common>',
           `#include <common>
           uniform float uScatter;
           uniform vec3 uScatterOrigin;
+          uniform float uScatterRadius;
           vec3 pointHash(vec3 p) {
             return fract(sin(vec3(
               dot(p, vec3(127.1, 311.7, 74.7)),
@@ -164,7 +168,7 @@ function loadRoomFrom(paths, index = 0) {
           `#include <begin_vertex>
           vec3 scatterDirection = normalize(pointHash(position + vec3(0.13, 2.71, 5.19)));
           float scatterDistance = 0.18 + 0.42 * fract(sin(dot(position, vec3(21.17, 9.23, 41.73))) * 43758.5453);
-          float scatterFalloff = 0.35 + 0.65 * clamp(distance(position, uScatterOrigin) / 2.5, 0.0, 1.0);
+          float scatterFalloff = 1.0 - smoothstep(uScatterRadius * 0.38, uScatterRadius, distance(position, uScatterOrigin));
           transformed += scatterDirection * scatterDistance * scatterFalloff * uScatter;`
         );
       };
@@ -325,16 +329,17 @@ async function startGestureMode() {
     gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
       baseOptions: { modelAssetPath: modelUrl, delegate: 'CPU' },
       runningMode: 'VIDEO',
-      numHands: 1,
+      numHands: 2,
       cannedGesturesClassifierOptions: { maxResults: 1, scoreThreshold: 0.58 },
     });
     if (generation !== gestureGeneration) throw new Error('手势控制启动已取消。');
 
     gestureActive = true;
     gestureLastSeen = 0;
-    lastGestureName = 'None';
+    lastGestureByHand.Left = 'None';
+    lastGestureByHand.Right = 'None';
     setGestureButtons('关闭摄像头手势控制');
-    commandStatus.textContent = '手势控制已开启：食指上指控制移动，张开手掌散开点云，竖拇指交互。';
+    commandStatus.textContent = '左手食指向左看、右手食指向右看；左/右拇指分别侧移。握拳后张开手掌可交互。';
     if (!document.pointerLockElement && !debugOpen) {
       hasStarted = true;
       entryScreen.hidden = true;
@@ -354,10 +359,11 @@ async function startGestureMode() {
 function stopGestureMode(showStatus = true) {
   gestureGeneration += 1;
   gestureActive = false;
-  gestureForward = 0;
   gestureTurn = 0;
+  gestureStrafe = 0;
   gestureLastSeen = 0;
-  lastGestureName = 'None';
+  lastGestureByHand.Left = 'None';
+  lastGestureByHand.Right = 'None';
   if (gestureRecognizer) {
     gestureRecognizer.close();
     gestureRecognizer = null;
@@ -377,7 +383,6 @@ function toggleGestureMode() {
   else startGestureMode();
 }
 
-let neutralHandY = 0.5;
 function recognizeHandFrame(time) {
   if (!gestureActive || debugOpen || !gestureRecognizer || gestureVideo.readyState < 2) return;
   if (time - lastGestureFrame < 100 || gestureVideo.currentTime === recognizeHandFrame.lastVideoTime) return;
@@ -393,31 +398,44 @@ function recognizeHandFrame(time) {
     commandStatus.textContent = '手势识别中断，摄像头已关闭；可继续使用鼠标和 WASD。';
     return;
   }
-  const hand = result.landmarks?.[0];
-  const category = result.gestures?.[0]?.[0];
-  const name = category && category.score >= 0.58 ? category.categoryName : 'None';
-  if (!hand || !category) {
-    gestureForward = 0;
+
+  const handsSeen = new Set();
+  let turn = 0;
+  let strafe = 0;
+  for (let i = 0; i < (result.landmarks?.length || 0); i += 1) {
+    const hand = result.landmarks[i];
+    const handSide = (result.handednesses?.[i]?.[0] || result.handedness?.[i]?.[0])?.categoryName;
+    if (!hand || !['Left', 'Right'].includes(handSide)) continue;
+    handsSeen.add(handSide);
+
+    const category = result.gestures?.[i]?.[0];
+    const name = category && category.score >= 0.58 ? category.categoryName : 'None';
+    const previousName = lastGestureByHand[handSide];
+
+    if (name === 'Pointing_Up') turn += handSide === 'Left' ? -1 : 1;
+    if (name === 'Thumb_Up') strafe += handSide === 'Left' ? -1 : 1;
+
+    // 握拳后张开才触发，避免手掌一直张开时反复触发交互。
+    if (name === 'Open_Palm' && previousName === 'Closed_Fist' && time - lastInteractionAt > 700) {
+      lastInteractionAt = time;
+      interactAtCrosshair();
+    }
+    lastGestureByHand[handSide] = name;
+  }
+
+  for (const handSide of ['Left', 'Right']) {
+    if (!handsSeen.has(handSide)) lastGestureByHand[handSide] = 'None';
+  }
+  if (handsSeen.size === 0) {
     gestureTurn = 0;
-    lastGestureName = 'None';
+    gestureStrafe = 0;
+    gestureLastSeen = 0;
     return;
   }
 
   gestureLastSeen = time;
-  const centerX = 1 - (hand[0].x + hand[9].x) * 0.5;
-  const centerY = (hand[0].y + hand[9].y) * 0.5;
-  if (name === 'Pointing_Up') {
-    if (lastGestureName !== 'Pointing_Up') neutralHandY = centerY;
-    gestureTurn = THREE.MathUtils.clamp((0.5 - centerX) * 2.2, -1, 1);
-    gestureForward = THREE.MathUtils.clamp((neutralHandY - centerY) * 4.0, -1, 1);
-  } else {
-    gestureForward = 0;
-    gestureTurn = 0;
-  }
-
-  if (name === 'Open_Palm' && lastGestureName !== 'Open_Palm') triggerScatter();
-  if (name === 'Thumb_Up' && lastGestureName !== 'Thumb_Up') interactAtCrosshair();
-  lastGestureName = name;
+  gestureTurn = THREE.MathUtils.clamp(turn, -1, 1);
+  gestureStrafe = THREE.MathUtils.clamp(strafe, -1, 1);
 }
 
 function interactAtCrosshair() {
@@ -567,14 +585,14 @@ function movePlayer(deltaSeconds) {
   const gestureFresh = gestureActive && gestureLastSeen && performance.now() - gestureLastSeen < 350;
   const pointerLocked = document.pointerLockElement === renderer.domElement;
   if (!hasStarted || (!pointerLocked && !gestureFresh) || debugOpen) return;
-  if (gestureFresh) yaw += gestureTurn * 1.2 * deltaSeconds;
+  if (gestureFresh) yaw += gestureTurn * 2.0 * deltaSeconds;
   let forward = 0;
   let strafe = 0;
   if (pressedKeys.has('w')) forward += 1;
   if (pressedKeys.has('s')) forward -= 1;
   if (pressedKeys.has('d')) strafe += 1;
   if (pressedKeys.has('a')) strafe -= 1;
-  if (gestureFresh) forward += gestureForward;
+  if (gestureFresh) strafe += gestureStrafe;
   if (forward === 0 && strafe === 0) {
     if (gestureFresh && gestureTurn !== 0) updateCameraLook();
     return;
@@ -583,7 +601,8 @@ function movePlayer(deltaSeconds) {
   const length = Math.hypot(forward, strafe);
   forward /= length;
   strafe /= length;
-  const distance = MOVE_SPEED * deltaSeconds;
+  const gestureMoving = gestureFresh && gestureStrafe !== 0;
+  const distance = MOVE_SPEED * deltaSeconds * (gestureMoving ? 1.35 : 1);
   const dx = (Math.sin(yaw) * forward + Math.cos(yaw) * strafe) * distance;
   const dy = (Math.cos(yaw) * forward - Math.sin(yaw) * strafe) * distance;
   // 将活动区域收在扫描房间的地面范围内，并留出墙边缓冲。
