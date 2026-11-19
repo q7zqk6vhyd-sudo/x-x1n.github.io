@@ -37,7 +37,7 @@ renderer.domElement.setAttribute('aria-label', '房间漫游画面');
 host.appendChild(renderer.domElement);
 
 const assetUrl = (path) => new URL(`./assets/${path}`, document.baseURI).href;
-const roomLoader = new PLYLoader();
+const roomLoader = new OBJLoader();
 const coordinateRaycaster = new THREE.Raycaster();
 const objectRaycaster = new THREE.Raycaster();
 const centerPointer = new THREE.Vector2(0, 0);
@@ -51,153 +51,6 @@ const audioListener = new THREE.AudioListener();
 camera.add(audioListener);
 const sound = new THREE.Audio(audioListener);
 const audioLoader = new THREE.AudioLoader();
-
-let roomCloud = null;
-let interactiveModel = null;
-let coordinateMode = false;
-let debugOpen = false;
-let hasStarted = false;
-let introPlaying = false;
-let introStartTime = 0;
-let previousFrameTime = 0;
-let yaw = Math.PI; // 朝向房间前墙（Y 轴负方向）。
-let pitch = 0;
-let floorZ = -1.364;
-let pointSize = 0.009;
-let gestureRecognizer = null;
-let gestureStream = null;
-let gestureActive = false;
-let gestureInitializing = false;
-let gestureGeneration = 0;
-let gestureTurn = 0;
-let gestureStrafe = 0;
-let gesturePitchActive = false;
-let gesturePitchNeutralY = 0.5;
-let gesturePitchBase = 0;
-let gesturePitchTarget = 0;
-let gestureLastSeen = 0;
-let lastGestureFrame = 0;
-const lastGestureByHand = { Left: 'None', Right: 'None' };
-let lastInteractionAt = 0;
-let scatterStartedAt = 0;
-let scatterAnimating = false;
-const pressedKeys = new Set();
-const WALK_LIMITS = { minX: -0.65, maxX: 0.60, minY: -0.68, maxY: 0.75 };
-const START_X = 0.404;
-const START_Y = 0.540;
-const EYE_HEIGHT = 1.6;
-const INTRO_MS = 3800;
-const MOVE_SPEED = 0.82;
-const LOOK_SENSITIVITY = 0.0022;
-
-function updateCameraLook() {
-  const cosPitch = Math.cos(pitch);
-  cameraDirection.set(
-    Math.sin(yaw) * cosPitch,
-    Math.cos(yaw) * cosPitch,
-    Math.sin(pitch)
-  );
-  cameraTarget.copy(camera.position).add(cameraDirection);
-  camera.lookAt(cameraTarget);
-}
-
-function showEntry(resume = false) {
-  entryTitle.textContent = resume ? '继续漫游' : '进入房间';
-  entryCopy.textContent = resume
-    ? '点击画面恢复鼠标视角。按 / 可打开调试指令。'
-    : '点击开始漫游。使用 WASD 移动，移动鼠标环视。';
-  enterButton.textContent = resume ? '继续漫游' : '开始漫游';
-  entryScreen.hidden = false;
-  crosshair.hidden = true;
-}
-
-function beginIntro() {
-  if (introPlaying) return;
-  introPlaying = true;
-  introStartTime = performance.now();
-  camera.position.set(START_X, START_Y, floorZ + 0.48);
-  yaw = Math.PI;
-  pitch = 0;
-  updateCameraLook();
-}
-
-function loadRoomFrom(paths, index = 0) {
-  if (index >= paths.length) {
-    loading.hidden = true;
-    errorBox.hidden = false;
-    errorBox.textContent = '房间模型未能载入。请确认 public/models/room.ply 文件存在。';
-    return;
-  }
-
-  roomLoader.load(
-    paths[index],
-    (geometry) => {
-      geometry.computeBoundingBox();
-      const box = geometry.boundingBox;
-      const center = box.getCenter(new THREE.Vector3());
-      const size = box.getSize(new THREE.Vector3());
-      geometry.translate(-center.x, -center.y, -center.z);
-
-      const hasColors = geometry.hasAttribute('color');
-      pointSize = Math.max(size.length() / 480, 0.003);
-      const material = new THREE.PointsMaterial({
-        size: pointSize,
-        sizeAttenuation: true,
-        vertexColors: hasColors,
-        color: hasColors ? 0xffffff : 0xc9ddd2,
-        transparent: true,
-        opacity: 0.96,
-        depthWrite: false,
-      });
-      material.onBeforeCompile = (shader) => {
-        shader.uniforms.uScatter = scatterUniform;
-        shader.uniforms.uScatterOrigin = scatterOriginUniform;
-        shader.uniforms.uScatterRadius = scatterRadiusUniform;
-        shader.vertexShader = shader.vertexShader.replace(
-          '#include <common>',
-          `#include <common>
-          uniform float uScatter;
-          uniform vec3 uScatterOrigin;
-          uniform float uScatterRadius;
-          vec3 pointHash(vec3 p) {
-            return fract(sin(vec3(
-              dot(p, vec3(127.1, 311.7, 74.7)),
-              dot(p, vec3(269.5, 183.3, 246.1)),
-              dot(p, vec3(113.5, 271.9, 124.6))
-            )) * 43758.5453) * 2.0 - 1.0;
-          }`
-        );
-        shader.vertexShader = shader.vertexShader.replace(
-          '#include <begin_vertex>',
-          `#include <begin_vertex>
-          vec3 scatterDirection = normalize(pointHash(position + vec3(0.13, 2.71, 5.19)));
-          float scatterDistance = 0.18 + 0.42 * fract(sin(dot(position, vec3(21.17, 9.23, 41.73))) * 43758.5453);
-          float scatterFalloff = 1.0 - smoothstep(uScatterRadius * 0.38, uScatterRadius, distance(position, uScatterOrigin));
-          transformed += scatterDirection * scatterDistance * scatterFalloff * uScatter;`
-        );
-      };
-      material.customProgramCacheKey = () => 'room-point-scatter-v1';
-      roomCloud = new THREE.Points(geometry, material);
-      roomCloud.frustumCulled = false;
-      scene.add(roomCloud);
-
-      camera.near = 0.01;
-      camera.far = Math.max(size.length() * 20, 100);
-      camera.updateProjectionMatrix();
-      loading.hidden = true;
-      beginIntro();
-    },
-    undefined,
-    (error) => {
-      console.warn(`房间模型路径不可用：${paths[index]}`, error);
-      loadRoomFrom(paths, index + 1);
-    }
-  );
-}
-
-// 兼容 GitHub 仓库直接发布（public/models）和 Vite 构建发布（models）。
-loadRoomFrom(['./models/room.ply', './public/models/room.ply']);
-
 const modelDirectory = assetUrl('INMOBJECT1/');
 const mtlLoader = new MTLLoader();
 mtlLoader.setPath(modelDirectory);
@@ -668,4 +521,47 @@ renderer.setAnimationLoop((time) => {
   renderer.render(scene, camera);
 });
 
-window.addEventListener('beforeunload', () => stopGestureMode(false));
+window.addEventListener('beforeunload', () => stopGestureMode(false));function loadRoomOBJ() {
+  roomLoader.load(assetUrl('ROOMSCENE/11_11_2026.obj'), (root) => {
+    root.updateMatrixWorld(true);
+    const points = [];
+    root.traverse((mesh) => {
+      if (!mesh.isMesh) return;
+      const g = mesh.geometry;
+      const attr = g.attributes.position;
+      const matrix = mesh.matrixWorld;
+      const v = new THREE.Vector3();
+      // Sample mesh vertices; retain the original room coordinate system for navigation.
+      for (let i = 0; i < attr.count; i += 2) {
+        v.fromBufferAttribute(attr, i).applyMatrix4(matrix);
+        points.push(v.x, v.y, v.z);
+      }
+    });
+    if (!points.length) {
+      loading.hidden = true;
+      errorBox.hidden = false;
+      errorBox.textContent = '房间模型中没有可读取的网格顶点。';
+      return;
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+    geometry.computeBoundingSphere();
+    pointSize = 0.009;
+    const material = new THREE.PointsMaterial({
+      size: pointSize, sizeAttenuation: true, color: 0xc9ddd2,
+      transparent: true, opacity: 0.86, depthWrite: false
+    });
+    roomCloud = new THREE.Points(geometry, material);
+    roomCloud.frustumCulled = false;
+    scene.add(roomCloud);
+    loading.hidden = true;
+    beginIntro();
+  }, undefined, (error) => {
+    console.error('房间 OBJ 载入失败', error);
+    loading.hidden = true;
+    errorBox.hidden = false;
+    errorBox.textContent = '房间模型载入失败，请检查 ROOMSCENE/11_11_2026.obj。';
+  });
+}
+loadRoomOBJ();
+
